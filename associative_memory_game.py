@@ -18,9 +18,24 @@ class AssociativeMemoryGame:
         turn: bool
         # Card A chosen by active player (if any)
         cardA: int | None
+        # Card B chosen by active player (if any)
+        cardB: int | None
         # Suggestion in the form (card, category) for card B by non-active player
         suggestionB: tuple[int, int] | None
-    
+
+        class _Missing: pass
+
+        def deep_update(self, cards=_Missing, faceup=_Missing, turn=_Missing, cardA=_Missing, cardB=_Missing, suggestionB=_Missing):
+            missing = AssociativeMemoryGame.State._Missing
+            return AssociativeMemoryGame.State(
+                cards=self.cards.copy() if cards is missing else cards,
+                faceup=self.faceup.copy() if faceup is missing else faceup,
+                turn=self.turn if turn is missing else turn,
+                cardA=self.cardA if cardA is missing else cardA,
+                cardB=self.cardB if cardB is missing else cardB,
+                suggestionB=self.suggestionB if suggestionB is missing else suggestionB,
+            )
+
     # Correct associations between cards. NOTE: each string must only appear
     # *once* for consistency. Each entry must contain exactly two strings.
     oracle: tuple[frozenset[str], ...]
@@ -49,6 +64,7 @@ class AssociativeMemoryGame:
             faceup=np.zeros(len(cards), dtype=bool),
             turn=0,
             cardA=None,
+            cardB=None,
             suggestionB=None
         )
 
@@ -59,43 +75,53 @@ class AssociativeMemoryGame:
 
         if state.cardA is None:
             # Active player chooses card A
+            assert state.cardB is None, "Card B chosen before card A"
             assert state.suggestionB is None, "Suggestion B chosen before card A"
             assert state.faceup.sum() % 2 == 0, f"Odd number of face-up cards"
             if state.faceup[card]:
                 # Card is already face up, do nothing
                 warning(f'Card A already face up: {card}')
-                return state
+                return state.deep_update()
             faceup = state.faceup.copy()
             faceup[card] = True
             # print(f'Card A chosen: {card}')
-            return state._replace(cardA=card, faceup=faceup)
+            return state.deep_update(cardA=card, faceup=faceup)
         
         if state.suggestionB is None:
             # Non-active player suggests card B
             # print(f'Suggestion B chosen: {card}, {category}')
-            return state._replace(suggestionB=(card, category))
+            return state.deep_update(suggestionB=(card, category))
 
-        # Both cards are chosen
-        if state.faceup[card]:
-            # Card B is already face up, do nothing
-            warning(f'Card B already face up: {card}')
-            return state
+        # Both cards are chosen (card B could still be face down)
 
-        if {state.cards[state.cardA], state.cards[card]} in self.oracle:
-            # Match found, keep cards face up
+        # Turn card B face up
+        if state.cardB is None:
+            if state.faceup[card]:
+                # Card B is already face up, do nothing
+                warning(f'Card B already face up: {card}')
+                return state.deep_update()
+            # Active player chooses card B
             faceup = state.faceup.copy()
             faceup[card] = True
+            # print(f'Card B chosen: {card}')
+            return state.deep_update(cardB=card, faceup=faceup)
+
+        # Both cards are face up, check for match
+        if {state.cards[state.cardA], state.cards[state.cardB]} in self.oracle:
+            # Match found, keep cards face up and switch turn
+            faceup = state.faceup.copy()
             # print(f'Match found: {state.cardA}, {card}')
             if faceup.sum() == len(state.cards):
                 # All cards are face up, game over
                 return None
-            return state._replace(faceup=faceup, cardA=None, suggestionB=None)
+            return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionB=None, turn=not state.turn)
         
         # No match, cover cards and switch turn
         faceup = state.faceup.copy()
         faceup[state.cardA] = False
-        # print(f'No match: {state.cardA}, {card}')
-        return state._replace(faceup=faceup, cardA=None, suggestionB=None, turn=not state.turn)
+        faceup[state.cardB] = False
+        # print(f'No match: {state.cardA}, {state.cardB}')
+        return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionB=None, turn=not state.turn)
 
     @staticmethod
     def grid_dimensions(num_cards):
