@@ -12,6 +12,8 @@ class AssociativeMemoryGame:
     class State(NamedTuple):
         # All cards on the board with their contents
         cards: np.ndarray[np.str_]
+        # Categories for each card
+        categories: np.ndarray[np.str_]
         # Boolean mask of which cards are face up
         faceup: np.ndarray[bool]
         # Active player
@@ -31,6 +33,7 @@ class AssociativeMemoryGame:
         def deep_update(
             self,
             cards=_Missing,
+            categories=_Missing,
             faceup=_Missing,
             turn=_Missing,
             cardA=_Missing,
@@ -41,6 +44,7 @@ class AssociativeMemoryGame:
             missing = AssociativeMemoryGame.State._Missing
             return AssociativeMemoryGame.State(
                 cards=self.cards.copy() if cards is missing else cards,
+                categories=self.categories.copy() if categories is missing else categories,
                 faceup=self.faceup.copy() if faceup is missing else faceup,
                 turn=self.turn if turn is missing else turn,
                 cardA=self.cardA if cardA is missing else cardA,
@@ -50,34 +54,41 @@ class AssociativeMemoryGame:
             )
 
     # Correct associations between cards. NOTE: each string must only appear
-    # *once* for consistency. Each entry must contain exactly two strings.
-    oracle: tuple[frozenset[str], ...]
+    # *once* in each category for consistency. Each item has the category as
+    # key, and the entry in the form {textA, textB} as value.
+    oracle: dict[str, tuple[frozenset[str], ...]]
+
+    # @staticmethod
+    # def as_oracle(*pairs: tuple[str, str]) -> tuple[frozenset[str], ...]:
+    #     return tuple(map(frozenset, pairs))
 
     @staticmethod
-    def as_oracle(*pairs: tuple[str, str]) -> tuple[frozenset[str], ...]:
-        return tuple(map(frozenset, pairs))
+    def make(**items: Iterable[tuple[str, str]]) -> "AssociativeMemoryGame":
+        return AssociativeMemoryGame({k: tuple(frozenset(vi) for vi in v) for k, v in items.items()})
 
-    @staticmethod
-    def make(*pairs: tuple[str, str]) -> "AssociativeMemoryGame":
-        return AssociativeMemoryGame(AssociativeMemoryGame.as_oracle(*pairs))
-
-    def cards(self) -> Iterator[str]:
-        cards = reduce(lambda A, B: tuple(A) + tuple(B), self.oracle, ())
-        return cards
+    def cards_and_categories(self) -> Iterator[str]:
+        for category, associations in self.oracle.items():
+            for cardA, cardB in associations:
+                yield category, cardA
+                yield category, cardB
 
     def __post_init__(self):
-        if not all(len(pair) == 2 for pair in self.oracle):
-            raise ValueError("Each entry in oracle must contain exactly two strings")
-        cards = self.cards()
-        if not len(cards) == len(set(cards)):
-            raise ValueError("Each string must appear exactly once in the oracle")
+        for category, associations in self.oracle.items():
+            if not all(len(pair) == 2 for pair in associations):
+                raise ValueError(f"Each entry in a category {category} must contain exactly two strings")
+            # TODO check each string appears only once for category
+            # if not len(associations) == len(set(associations)):
+            #     raise ValueError(f"Each pair of strings must appear exactly once in category {category}")
 
     def reset(self, seed=42) -> State:
         rng = np.random.default_rng(seed)
-        cards = np.array(self.cards())
-        rng.shuffle(cards)
+        cards_and_categories = list(self.cards_and_categories())
+        rng.shuffle(cards_and_categories)
+        cards = np.array([card for _, card in cards_and_categories], dtype=np.str_)
+        categories = np.array([category for category, _ in cards_and_categories], dtype=np.str_)
         return self.State(
             cards=cards,
+            categories=categories,
             faceup=np.zeros(len(cards), dtype=bool),
             turn=0,
             cardA=None,
@@ -130,14 +141,15 @@ class AssociativeMemoryGame:
             return state.deep_update(cardB=card, faceup=faceup)
 
         # Both cards are face up, check for match
-        if {state.cards[state.cardA], state.cards[state.cardB]} in self.oracle:
-            # Match found, keep cards face up and switch turn
-            faceup = state.faceup.copy()
-            # print(f'Match found: {state.cardA}, {card}')
-            if faceup.sum() == len(state.cards):
-                # All cards are face up, game over
-                return None
-            return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
+        if state.categories[state.cardA] == state.categories[state.cardB]:
+            if {state.cards[state.cardA], state.cards[state.cardB]} in self.oracle[state.categories[state.cardA]]:
+                # Match found, keep cards face up and switch turn
+                faceup = state.faceup.copy()
+                # print(f'Match found: {state.cardA}, {card}')
+                if faceup.sum() == len(state.cards):
+                    # All cards are face up, game over
+                    return None
+                return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
         
         # No match, cover cards and switch turn
         faceup = state.faceup.copy()
@@ -192,11 +204,12 @@ class AssociativeMemoryGame:
             if state.faceup[i]:
                 color = FACEUP_COLOR
                 text = str(card)
-                print(f'[U] Card {i}: {card}, faceup: {state.faceup[i]}')
+                text = f'[{state.categories[i]}] {text}'
+                # print(f'[U] Card {i}: {card}, faceup: {state.faceup[i]}')
             else:
                 color = CARD_COLOR
                 text = ""
-                print(f'[D] Card {i}: {card}, faceup: {state.faceup[i]}')
+                # print(f'[D] Card {i}: {card}, faceup: {state.faceup[i]}')
 
             pygame.draw.rect(canvas, color, (x, y, CARD_WIDTH, CARD_HEIGHT))
             text_surface = font.render(text, True, TEXT_COLOR)
@@ -237,6 +250,7 @@ class AssociativeMemoryGame:
                     print('Card:', card)
                     state = self.step(state, (card, 0))
                     if state is None:
+                        print('Game over (Win)')
                         running = False
                     else:
                         screen.blit(self.render(state, W, H, rows, cols), (0, 0))
@@ -245,9 +259,13 @@ class AssociativeMemoryGame:
 
 
 if __name__ == "__main__":
-    game = AssociativeMemoryGame(AssociativeMemoryGame.as_oracle(
-        ("A", "a"), ("B", "b"),
-        ("C", "c"), ("D", "d"),
-    ))
+    game = AssociativeMemoryGame.make(
+        letters=(
+            ("A", "a"), ("B", "b"),
+        ),
+        numbers=(
+            ("1", "one"), ("2", "two"),
+        ),
+    )
     game.play()
 
