@@ -20,12 +20,24 @@ class AssociativeMemoryGame:
         cardA: int | None
         # Card B chosen by active player (if any)
         cardB: int | None
+        # Suggestion in the form (card, category) for card A by non-active player
+        suggestionA: tuple[int, int] | None
         # Suggestion in the form (card, category) for card B by non-active player
         suggestionB: tuple[int, int] | None
 
+        # Using a singleton since None is a valid value for some fields
         class _Missing: pass
 
-        def deep_update(self, cards=_Missing, faceup=_Missing, turn=_Missing, cardA=_Missing, cardB=_Missing, suggestionB=_Missing):
+        def deep_update(
+            self,
+            cards=_Missing,
+            faceup=_Missing,
+            turn=_Missing,
+            cardA=_Missing,
+            cardB=_Missing,
+            suggestionA=_Missing,
+            suggestionB=_Missing
+        ):
             missing = AssociativeMemoryGame.State._Missing
             return AssociativeMemoryGame.State(
                 cards=self.cards.copy() if cards is missing else cards,
@@ -33,6 +45,7 @@ class AssociativeMemoryGame:
                 turn=self.turn if turn is missing else turn,
                 cardA=self.cardA if cardA is missing else cardA,
                 cardB=self.cardB if cardB is missing else cardB,
+                suggestionA=self.suggestionA if suggestionA is missing else suggestionA,
                 suggestionB=self.suggestionB if suggestionB is missing else suggestionB,
             )
 
@@ -43,6 +56,10 @@ class AssociativeMemoryGame:
     @staticmethod
     def as_oracle(*pairs: tuple[str, str]) -> tuple[frozenset[str], ...]:
         return tuple(map(frozenset, pairs))
+
+    @staticmethod
+    def make(*pairs: tuple[str, str]) -> "AssociativeMemoryGame":
+        return AssociativeMemoryGame(AssociativeMemoryGame.as_oracle(*pairs))
 
     def cards(self) -> Iterator[str]:
         cards = reduce(lambda A, B: tuple(A) + tuple(B), self.oracle, ())
@@ -65,6 +82,7 @@ class AssociativeMemoryGame:
             turn=0,
             cardA=None,
             cardB=None,
+            suggestionA=None,
             suggestionB=None
         )
 
@@ -72,6 +90,11 @@ class AssociativeMemoryGame:
         card, category = action
         if card not in range(len(state.cards)):
             raise ValueError(f"Invalid card index {card}")
+
+        if state.suggestionA is None:
+            # Non-active player suggests card A
+            # print(f'Suggestion A chosen: {card}, {category}')
+            return state.deep_update(suggestionA=(card, category))
 
         if state.cardA is None:
             # Active player chooses card A
@@ -114,14 +137,14 @@ class AssociativeMemoryGame:
             if faceup.sum() == len(state.cards):
                 # All cards are face up, game over
                 return None
-            return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionB=None, turn=not state.turn)
+            return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
         
         # No match, cover cards and switch turn
         faceup = state.faceup.copy()
         faceup[state.cardA] = False
         faceup[state.cardB] = False
         # print(f'No match: {state.cardA}, {state.cardB}')
-        return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionB=None, turn=not state.turn)
+        return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
 
     @staticmethod
     def grid_dimensions(num_cards):
@@ -181,7 +204,7 @@ class AssociativeMemoryGame:
             canvas.blit(text_surface, text_rect)
 
         # Print state at the bottom
-        state_text = f"Turn: {'Player 1' if state.turn == 0 else 'Player 2'}, Card A: {state.cardA}, Suggestion B: {state.suggestionB}"
+        state_text = f"Turn: {'Player 1' if state.turn == 0 else 'Player 2'}, Suggestion A: {state.suggestionA}, Card A: {state.cardA}, Suggestion B: {state.suggestionB}"
         state_surface = font.render(state_text, True, STATE_LINE_COLOR)
         state_rect = state_surface.get_rect(center=(width // 2, height - PADDING))
         canvas.blit(state_surface, state_rect)
