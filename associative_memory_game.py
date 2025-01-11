@@ -22,14 +22,11 @@ class AssociativeMemoryGame:
         cardA: int | None
         # Card B chosen by active player (if any)
         cardB: int | None
-        # Suggestion in the form (card, category) for card A by non-active player
-        suggestionA: tuple[int, int] | None
-        # Suggestion in the form (card, category) for card B by non-active player
-        suggestionB: tuple[int, int] | None
 
-        # Using a singleton since None is a valid value for some fields
-        class _Missing: pass
+        class _Missing: pass # sentinel value for missing fields
 
+        # copy and possibly modify; using _Missing as default since None is a
+        # valid value for some fields
         def deep_update(
             self,
             cards=_Missing,
@@ -38,8 +35,6 @@ class AssociativeMemoryGame:
             turn=_Missing,
             cardA=_Missing,
             cardB=_Missing,
-            suggestionA=_Missing,
-            suggestionB=_Missing
         ):
             missing = AssociativeMemoryGame.State._Missing
             return AssociativeMemoryGame.State(
@@ -49,18 +44,12 @@ class AssociativeMemoryGame:
                 turn=self.turn if turn is missing else turn,
                 cardA=self.cardA if cardA is missing else cardA,
                 cardB=self.cardB if cardB is missing else cardB,
-                suggestionA=self.suggestionA if suggestionA is missing else suggestionA,
-                suggestionB=self.suggestionB if suggestionB is missing else suggestionB,
             )
 
     # Correct associations between cards. NOTE: each string must only appear
     # *once* in each category for consistency. Each item has the category as
     # key, and the entry in the form {textA, textB} as value.
     oracle: dict[str, tuple[frozenset[str], ...]]
-
-    # @staticmethod
-    # def as_oracle(*pairs: tuple[str, str]) -> tuple[frozenset[str], ...]:
-    #     return tuple(map(frozenset, pairs))
 
     @staticmethod
     def make(**items: Iterable[tuple[str, str]]) -> "AssociativeMemoryGame":
@@ -93,24 +82,22 @@ class AssociativeMemoryGame:
             turn=0,
             cardA=None,
             cardB=None,
-            suggestionA=None,
-            suggestionB=None
         )
 
-    def step(self, state: State, action: tuple[int, int]) -> State | None:
-        card, category = action
+    # actions are N_cards+1:
+    # - 0: pass control to the other player
+    # - 1..N_cards: choose a card to uncover
+    def step(self, state: State, action: int) -> State | None:
+        if action == 0:
+            return state.deep_update(turn=not state.turn)
+
+        card = action - 1
         if card not in range(len(state.cards)):
             raise ValueError(f"Invalid card index {card}")
-
-        if state.suggestionA is None:
-            # Non-active player suggests card A
-            # print(f'Suggestion A chosen: {card}, {category}')
-            return state.deep_update(suggestionA=(card, category))
 
         if state.cardA is None:
             # Active player chooses card A
             assert state.cardB is None, "Card B chosen before card A"
-            assert state.suggestionB is None, "Suggestion B chosen before card A"
             assert state.faceup.sum() % 2 == 0, f"Odd number of face-up cards"
             if state.faceup[card]:
                 # Card is already face up, do nothing
@@ -120,16 +107,11 @@ class AssociativeMemoryGame:
             faceup[card] = True
             # print(f'Card A chosen: {card}')
             return state.deep_update(cardA=card, faceup=faceup)
-        
-        if state.suggestionB is None:
-            # Non-active player suggests card B
-            # print(f'Suggestion B chosen: {card}, {category}')
-            return state.deep_update(suggestionB=(card, category))
 
-        # Both cards are chosen (card B could still be face down)
-
-        # Turn card B face up
         if state.cardB is None:
+            # Active player chooses card B
+            assert state.cardA is not None, "Card B chosen before card A"
+            assert state.faceup.sum() % 2 == 1, f"Even number of face-up cards"
             if state.faceup[card]:
                 # Card B is already face up, do nothing
                 warning(f'Card B already face up: {card}')
@@ -149,14 +131,14 @@ class AssociativeMemoryGame:
                 if faceup.sum() == len(state.cards):
                     # All cards are face up, game over
                     return None
-                return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
+                return state.deep_update(faceup=faceup, cardA=None, cardB=None)
         
         # No match, cover cards and switch turn
         faceup = state.faceup.copy()
         faceup[state.cardA] = False
         faceup[state.cardB] = False
         # print(f'No match: {state.cardA}, {state.cardB}')
-        return state.deep_update(faceup=faceup, cardA=None, cardB=None, suggestionA=None, suggestionB=None, turn=not state.turn)
+        return state.deep_update(faceup=faceup, cardA=None, cardB=None)
 
     @staticmethod
     def grid_dimensions(num_cards):
@@ -172,7 +154,6 @@ class AssociativeMemoryGame:
         CARD_HEIGHT = (height - (rows + 2) * PADDING) // rows  # Reserve space for text at the bottom
         return CARD_WIDTH, CARD_HEIGHT, PADDING
 
-    # TODO fix bug of cardA remain faceup sometimes
     # Draw using pygame (needs pygame.init() to be called before)
     def render(self, state: State, width: int, height: int, rows: int, cols: int) -> pygame.Surface:
         # Constants
@@ -217,7 +198,7 @@ class AssociativeMemoryGame:
             canvas.blit(text_surface, text_rect)
 
         # Print state at the bottom
-        state_text = f"Turn: {'Player 1' if state.turn == 0 else 'Player 2'}, Suggestion A: {state.suggestionA}, Card A: {state.cardA}, Suggestion B: {state.suggestionB}"
+        state_text = f"Turn: {'Player 1' if state.turn == 0 else 'Player 2'}, Card A: {state.cardA}, Card B: {state.cardB}"
         state_surface = font.render(state_text, True, STATE_LINE_COLOR)
         state_rect = state_surface.get_rect(center=(width // 2, height - PADDING))
         canvas.blit(state_surface, state_rect)
@@ -242,13 +223,20 @@ class AssociativeMemoryGame:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
+                action = None
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE:
+                    print('Switching turn')
+                    action = 0
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     x, y = event.pos
                     col = x // (CARD_WIDTH + PADDING)
                     row = y // (CARD_HEIGHT + PADDING)
                     card = col + row * cols
-                    print('Card:', card)
-                    state = self.step(state, (card, 0))
+                    print('Chosen card:', card)
+                    if card < len(state.cards):
+                        action = card + 1
+                if action is not None:
+                    state = self.step(state, action)
                     if state is None:
                         print('Game over (Win)')
                         running = False
