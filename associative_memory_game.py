@@ -51,11 +51,19 @@ class AssociativeMemoryGame:
     # key, and the entry in the form {textA, textB} as value.
     oracle: dict[str, tuple[frozenset[str], ...]]
 
+    def has_new_match(self, state: State) -> bool:
+        if state.cardA is None or state.cardB is None:
+            return False
+        if state.categories[state.cardA] == state.categories[state.cardB]:
+            if {state.cards[state.cardA], state.cards[state.cardB]} in self.oracle[state.categories[state.cardA]]:
+                return True
+        return False
+
     @staticmethod
     def make(**items: Iterable[tuple[str, str]]) -> "AssociativeMemoryGame":
         return AssociativeMemoryGame({k: tuple(frozenset(vi) for vi in v) for k, v in items.items()})
 
-    def cards_and_categories(self) -> Iterator[str]:
+    def cards_and_categories(self) -> Iterator[tuple[str, str]]:
         for category, associations in self.oracle.items():
             for cardA, cardB in associations:
                 yield category, cardA
@@ -69,7 +77,7 @@ class AssociativeMemoryGame:
             # if not len(associations) == len(set(associations)):
             #     raise ValueError(f"Each pair of strings must appear exactly once in category {category}")
 
-    def reset(self, seed=42) -> State:
+    def reset(self, seed=None) -> State:
         rng = np.random.default_rng(seed)
         cards_and_categories = list(self.cards_and_categories())
         rng.shuffle(cards_and_categories)
@@ -101,7 +109,7 @@ class AssociativeMemoryGame:
             assert state.faceup.sum() % 2 == 0, f"Odd number of face-up cards"
             if state.faceup[card]:
                 # Card is already face up, do nothing
-                warning(f'Card A already face up: {card}')
+                # warning(f'Card A already face up: {card}')
                 return state.deep_update()
             faceup = state.faceup.copy()
             faceup[card] = True
@@ -114,7 +122,7 @@ class AssociativeMemoryGame:
             assert state.faceup.sum() % 2 == 1, f"Even number of face-up cards"
             if state.faceup[card]:
                 # Card B is already face up, do nothing
-                warning(f'Card B already face up: {card}')
+                # warning(f'Card B already face up: {card}')
                 return state.deep_update()
             # Active player chooses card B
             faceup = state.faceup.copy()
@@ -123,16 +131,16 @@ class AssociativeMemoryGame:
             return state.deep_update(cardB=card, faceup=faceup)
 
         # Both cards are face up, check for match
-        if state.categories[state.cardA] == state.categories[state.cardB]:
-            if {state.cards[state.cardA], state.cards[state.cardB]} in self.oracle[state.categories[state.cardA]]:
-                # Match found, keep cards face up and switch turn
-                faceup = state.faceup.copy()
-                # print(f'Match found: {state.cardA}, {card}')
-                if faceup.sum() == len(state.cards):
-                    # All cards are face up, game over
-                    return None
-                return state.deep_update(faceup=faceup, cardA=None, cardB=None)
-        
+
+        if self.has_new_match(state):
+            # Match found, keep cards face up and switch turn
+            faceup = state.faceup.copy()
+            # print(f'Match found: {state.cardA}, {card}')
+            if faceup.sum() == len(state.cards):
+                # All cards are face up, game over
+                return None
+            return state.deep_update(faceup=faceup, cardA=None, cardB=None)
+
         # No match, cover cards and switch turn
         faceup = state.faceup.copy()
         faceup[state.cardA] = False
