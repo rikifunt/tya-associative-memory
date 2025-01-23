@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from functools import reduce
-from itertools import takewhile
 from typing import Callable, Iterable, Iterator, NamedTuple, TypeVar
 
 from tqdm import tqdm
@@ -41,14 +40,18 @@ def steps(env: gym.Env, policy: Callable[[object], object]):
         state = next_state
 
 def episode(env: gym.Env, policy: Callable[[object], object]):
-    return takewhile(lambda ts: not ts.done, steps(env, policy))
+    # Can't use take while here because we need to yield the last step
+    for ts in steps(env, policy):
+        yield ts
+        if ts.done:
+            break
 
 def eval_policy(env: gym.Env, policy: Callable[[object], object]):
-    return reduce(lambda acc, ts: (acc[0] + ts.reward, acc[0]+1), episode(env, policy), (0, 0))
+    return reduce(lambda acc, ts: (acc[0] + ts.reward, acc[1]+1, ts.term), episode(env, policy), (0, 0, None))
 
-def mean_eval(env: gym.Env, policy: Callable[[object], object], n=10):
+def evals(env: gym.Env, policy: Callable[[object], object], n=10):
     evals = np.array([eval_policy(env, policy) for _ in range(n)])
-    return evals[:,0].mean(), evals[:,1].mean()
+    return evals[:,0], evals[:,1], evals[:,2]
 
 T = TypeVar('T')
 
@@ -122,24 +125,39 @@ def main():
     env = make_env()
     eval_env = make_env()
 
-    n_steps = 5000
+    n_steps = 50000
     epsilon_schedule = TabularQLearning.linear_schedule(initial=0.5, n=n_steps)
     algo = TabularQLearning(epsilon_schedule=epsilon_schedule)
 
-    random_policy_ret, random_policy_len = mean_eval(eval_env, lambda _: np.random.choice(4), n=100)
+    random_policy_rets, random_policy_lens, random_policy_wins = evals(eval_env, lambda _: np.random.choice(4), n=1000)
+    random_policy_ret = random_policy_rets.mean()
+    random_policy_len = random_policy_lens.mean()
+    random_policy_wr = random_policy_wins.mean()
 
     eval_returns = []
     eval_lens = []
+    eval_wrs = []
     epsilons = []
     for i, agent in enumerate(tqdm(Take(n_steps, algo.run(env)))):
         # print(f'i: {i}')
-        if i % 10 == 0:
+        if i % 100 == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
-            ret, ep_len = mean_eval(eval_env, agent.best_action)
-            eval_returns.append(ret)
-            eval_lens.append(ep_len)
+            rets, ep_lens, terms = evals(eval_env, agent.best_action, n=20)
+            eval_returns.append(rets.mean())
+            eval_lens.append(ep_lens.mean())
+            eval_wrs.append(terms.mean())
+            # for term in terms:
+            #     if term:
+            #         print(f'[{i}] found eval WIN: ')
             epsilons.append(agent.epsilon)
-    print(f'learned Q: {agent.q.shape}')
+            if terms.mean() > 0.99:
+                break
+    # print(f'learned Q: {agent.q.shape}')
+
+    rets, ep_lens, terms = evals(eval_env, agent.best_action, n=1000)
+    print(f'final eval returns: {rets.mean()} (random: {random_policy_ret})')
+    print(f'final eval episode length: {ep_lens.mean()} (random: {random_policy_len})')
+    print(f'final eval win rate: {terms.mean()} (random: {random_policy_wr})')
 
     plt.plot(eval_returns, label='eval returns')
     plt.plot([random_policy_ret] * len(eval_returns), label='random policy returns')
@@ -148,6 +166,11 @@ def main():
 
     plt.plot(eval_lens, label='eval episode lengths')
     plt.plot([random_policy_len] * len(eval_lens), label='random policy episode lengths')
+    plt.legend()
+    plt.show()
+
+    plt.plot(eval_wrs, label='eval win rates')
+    plt.plot([random_policy_wr] * len(eval_wrs), label='random policy win rates')
     plt.legend()
     plt.show()
 
