@@ -1,0 +1,6 @@
+# python=3.10
+gymnasium==1.0.0
+numpy==1.26.4
+pygame==2.6.1
+matplotlib==3.10.0
+tqdm==4.67.1

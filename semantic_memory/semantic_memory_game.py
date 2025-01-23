@@ -34,6 +34,8 @@ class MemoryGame:
     def reset(self, seed=None) -> np.ndarray[int]:
         return np.full(self.n_cards, MemoryGame.CardState.UNSEEN)
 
+    # TODO try having 1 special action for turn random card, and make invalid
+    # turning up unseen cards (no-op)
     def step(self, state: np.ndarray[int], action: int) -> np.ndarray[int] | None:
         if (state == MemoryGame.CardState.SOLVED).all():
             # Game is over (all cards are solved)
