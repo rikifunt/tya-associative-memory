@@ -122,28 +122,33 @@ def main():
     env = make_env()
     eval_env = make_env()
 
-    n_steps = 500_000
+    n_steps = 5000
     epsilon_schedule = TabularQLearning.linear_schedule(initial=0.5, n=n_steps)
     algo = TabularQLearning(epsilon_schedule=epsilon_schedule)
+
+    random_policy_ret, random_policy_len = mean_eval(eval_env, lambda _: np.random.choice(4), n=100)
 
     eval_returns = []
     eval_lens = []
     epsilons = []
     for i, agent in enumerate(tqdm(Take(n_steps, algo.run(env)))):
         # print(f'i: {i}')
-        if i % 1000 == 0:
+        if i % 10 == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
-            ret, len = mean_eval(eval_env, agent.best_action)
+            ret, ep_len = mean_eval(eval_env, agent.best_action)
             eval_returns.append(ret)
-            eval_lens.append(len)
+            eval_lens.append(ep_len)
             epsilons.append(agent.epsilon)
     print(f'learned Q: {agent.q.shape}')
 
     plt.plot(eval_returns, label='eval returns')
+    plt.plot([random_policy_ret] * len(eval_returns), label='random policy returns')
+    plt.legend()
     plt.show()
-    # plt.legend()
 
     plt.plot(eval_lens, label='eval episode lengths')
+    plt.plot([random_policy_len] * len(eval_lens), label='random policy episode lengths')
+    plt.legend()
     plt.show()
 
     plt.plot(epsilons, label='epsilon')
