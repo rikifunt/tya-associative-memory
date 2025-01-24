@@ -40,7 +40,7 @@ class MemoryGame:
         if (state == MemoryGame.CardState.SOLVED).all():
             # Game is over (all cards are solved)
             # print(f'[Game] All cards are solved')
-            return None
+            return state.copy()
 
         if state[action] == MemoryGame.CardState.FACE_UP or state[action] == MemoryGame.CardState.SOLVED:
             # Do nothing (invalid action)
@@ -208,24 +208,23 @@ class MemoryGameEnv(gym.Env):
     def __init__(self, game: MemoryGame, max_steps=None):
         self.game = game
         self.max_steps = max_steps if max_steps is not None else 2**self.game.n_cards
-        self.observation_space = spaces.Discrete(1 + 4**self.game.n_cards)
+        self.observation_space = spaces.Discrete(4**self.game.n_cards)
         self.action_space = spaces.Discrete(self.game.n_cards)
-        self.game_state = None
+        self.final_state = np.full(self.game.n_cards, MemoryGame.CardState.SOLVED)
+        self.game_state = np.full(self.game.n_cards, MemoryGame.CardState.UNSEEN)
         self.steps = None
 
     def observe(self):
-        if self.game_state is None:
-            return 0
         # map from array of values in 0-3 to single integer
-        return 1 + (4**np.arange(self.game.n_cards) * self.game_state).sum()
+        return (4**np.arange(self.game.n_cards) * self.game_state).sum()
 
     def reward(self, s, s1):
-        if s1 is None:
+        if (s1 == self.final_state).all():
             return 100.0
         if self.game.have_new_match(s, s1):
             # print("MATCH")
             return 1.0
-        return -1.0
+        return 0.0
 
     def reset(self, seed=None, options=None):
         # print(f'[env] reset')
@@ -238,7 +237,7 @@ class MemoryGameEnv(gym.Env):
         # print(f'[env] last_state is None: {last_state is None}')
         self.game_state = self.game.step(self.game_state, action)
         self.steps += 1
-        term = self.game_state is None
+        term = (self.game_state==self.final_state).all()
         trunc = self.steps >= self.max_steps
         # print(f'[env] state is None: {self.game_state is None}, term: {term}')
         return self.observe(), self.reward(last_state, self.game_state), term, trunc, {}

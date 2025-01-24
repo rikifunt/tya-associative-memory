@@ -6,6 +6,7 @@ from tqdm import tqdm
 from matplotlib import pyplot as plt
 import numpy as np
 import pygame
+import math
 import gymnasium as gym
 from gymnasium import spaces
 
@@ -81,6 +82,10 @@ class TabularQLearning:
     @staticmethod
     def decay_schedule(initial: float= 0.1, decay: float = 0.999):
         return lambda i: initial * decay**i
+    
+    @staticmethod
+    def exponential_epsilon_decay(epsilon_start=1, epsilon_end=0.01, epsilon_decay=5000):
+        return lambda i: epsilon_end + (epsilon_start - epsilon_end) * math.exp(-1. * i / epsilon_decay)
 
     @staticmethod
     def linear_schedule(initial: float = 0.1, final: float = 0.01, n: int = 10000):
@@ -105,7 +110,7 @@ class TabularQLearning:
             return self.best_action(s)
 
     def update(self, q: np.ndarray, ts: TimeStep):
-        q[ts.state, ts.action] += self.alpha * (ts.reward + ts.term * self.gamma * np.max(q[ts.next_state]) - q[ts.state, ts.action])
+        q[ts.state, ts.action] += self.alpha * (ts.reward + (1-ts.term)*self.gamma * np.max(q[ts.next_state]) - q[ts.state, ts.action])
 
     def run(self, env: gym.Env, q: np.ndarray | None = None) -> Iterator[State]:
         assert isinstance(env.observation_space, spaces.Discrete)
@@ -125,10 +130,11 @@ def main():
     env = make_env()
     eval_env = make_env()
 
-    n_steps = 100_000
-    epsilon_schedule = TabularQLearning.linear_schedule(initial=0.5, n=n_steps)
+    n_steps = 10000
+    epsilon_schedule = TabularQLearning.exponential_epsilon_decay(epsilon_start= 1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = TabularQLearning(
-        alpha=5e-3,
+        alpha=0.99,
+        gamma=0.99,
         epsilon_schedule=epsilon_schedule
     )
 
@@ -156,13 +162,13 @@ def main():
             #         print(f'[{i}] found eval WIN: ')
             epsilons.append(agent.epsilon)
             # Early stopping
-            if terms.mean() > best_wr:
-                best_wr_agent = agent
-                best_wr = terms.mean()
+            # if terms.mean() > best_wr:
+            #     best_wr_agent = agent
+            #     best_wr = terms.mean()
     # print(f'learned Q: {agent.q.shape}')
     best_agent = best_wr_agent
 
-    rets, ep_lens, terms = evals(eval_env, best_agent.best_action, n=1000)
+    rets, ep_lens, terms = evals(eval_env, agent.best_action, n=1000)
     print(f'final eval returns: {rets.mean()} +- {rets.std():.2f} (random: {random_policy_ret} +- {random_policy_rets.std():.2f})')
     print(f'final eval episode lengths: {ep_lens.mean()} +- {ep_lens.std():.2f} (random: {random_policy_len} +- {random_policy_lens.std():.2f})')
     print(f'final eval win rates: {terms.mean()} +- {terms.std():.2f} (random: {random_policy_wr} +- {random_policy_wins.std():.2f})')
@@ -182,8 +188,8 @@ def main():
     plt.legend()
     plt.show()
 
-    # plt.plot(epsilons, label='epsilon')
-    # plt.show()
+    plt.plot(epsilons, label='epsilon')
+    plt.show()
 
 
 
