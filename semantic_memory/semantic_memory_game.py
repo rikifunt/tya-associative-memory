@@ -253,33 +253,6 @@ class MemoryGameEnv(gym.Env):
 #     max_episode_steps=100,
 # )
 
-class TwoAgentHandoverWrapper(gym.Wrapper):
-    """Wrapper introducing a 2-agent handover action to the environment.
-    
-    An additional action is added to the environment, which allows the current
-    agent to hand over control to a second agent. The actual handover is
-    delegated to the caller of env.step.
-    """
-
-    def __init__(self, env: gym.Env):
-        super().__init__(env)
-        assert isinstance(env.action_space, spaces.Discrete)
-        self.action_space = spaces.Discrete(env.action_space.n + 1)
-        self.observation_space = env.observation_space
-        self.last_step = None
-
-    def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-        self.last_step = obs, 0, False, False, info
-        return obs, info
-
-    def step(self, action):
-        if action == 0:
-            return self.last_step
-        self.last_step = self.env.step(action-1)
-        return self.last_step
-
-
 
 if __name__ == '__main__':
     test_interactive_match()
