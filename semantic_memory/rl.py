@@ -106,7 +106,8 @@ class TabularQLearning:
             return self.best_action(s)
 
     def update(self, q: np.ndarray, ts: TimeStep):
-        q[ts.state, ts.action] += self.alpha * (ts.reward + (1-ts.term)*self.gamma * np.max(q[ts.next_state]) - q[ts.state, ts.action])
+        V_next = (1-ts.term)*self.gamma * np.max(q[ts.next_state])
+        q[ts.state, ts.action] += self.alpha * (ts.reward + V_next - q[ts.state, ts.action])
 
     def run(self, env: gym.Env, q: np.ndarray | None = None) -> Iterator[State]:
         assert isinstance(env.observation_space, spaces.Discrete)

@@ -243,10 +243,15 @@ class MemoryGameEnv(gym.Env):
             return 1.0
         return 0.0
 
+    @property
+    def timed_out(self):
+        return self.steps >= self.max_steps
+
     def reset(self, seed=None, options=None):
         # print(f'[env] reset')
         self.game_state = self.game.reset()
         self.steps = 0
+        # print(f'[GAME] END RESET')
         return self.observe(), {}
 
     def step(self, action):
@@ -255,9 +260,9 @@ class MemoryGameEnv(gym.Env):
         self.game_state = self.game.step(self.game_state, action)
         self.steps += 1
         term = self.game_state.solved
-        trunc = self.steps >= self.max_steps
+        # print(f'[GAME] steps: {self.steps}, max_steps: {self.max_steps}, term: {term}, trunc: {self.timed_out}')
         # print(f'[env] state is None: {self.game_state is None}, term: {term}')
-        return self.observe(), self.reward(last_state, self.game_state), term, trunc, {}
+        return self.observe(), self.reward(last_state, self.game_state), term, self.timed_out, {}
 
 # from gymnasium.envs.registration import register
 
