@@ -172,7 +172,7 @@ def train_omniscent_ai_only():
         rl.Stats.terminated,
     )
 
-    n_steps = 100_000
+    n_steps = 200_000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
         alpha=0.2,
@@ -188,7 +188,7 @@ def train_omniscent_ai_only():
     best_wr = -1
     for i, agent in enumerate(tqdm(rl.Take(n_steps, algo.run(env)))):
         # print(f'i: {i}')
-        if i % 100 == 0:
+        if i % (n_steps // 100) == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
             rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
@@ -235,7 +235,7 @@ def train_partial_ai_only():
         rl.Stats.terminated,
     )
 
-    n_steps = 100_000
+    n_steps = 200_000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
         alpha=0.2,
@@ -251,7 +251,7 @@ def train_partial_ai_only():
     best_wr = -1
     for i, agent in enumerate(tqdm(rl.Take(n_steps, algo.run(env)))):
         # print(f'i: {i}')
-        if i % 100 == 0:
+        if i % (n_steps // 100) == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
             rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
@@ -298,7 +298,7 @@ def train_mixed_team():
         rl.Stats.terminated,
     )
 
-    n_steps = 100_000
+    n_steps = 200_000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
         alpha=0.2,
@@ -321,7 +321,7 @@ def train_mixed_team():
     best_len = np.inf
     for i, agent in enumerate(tqdm(rl.Take(n_steps, algo.run(env)))):
         # print(f'i: {i}')
-        if i % 100 == 0:
+        if i % (n_steps // 100) == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
             rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
@@ -424,6 +424,11 @@ def plot_results():
         fn: np.load(f'../results/{fn}_results.npz')
         for fn in train_fns
     }
+    train_fn_names = {
+        'train_omniscent_ai_only': 'AI only (omniscent)',
+        'train_partial_ai_only': 'AI only (partial competence)',
+        'train_mixed_team': 'AI (partial competence) + human',
+    }
 
     fixed_evals = [
         'random'
@@ -432,16 +437,33 @@ def plot_results():
         k: globals()[f'eval_only_{k}']()
         for k in fixed_evals
     }
+    fixed_names = {
+        'random': 'Random policy',
+    }
 
-    train_xs = np.arange(100_000, step=100)
+    infos = {
+        'returns': {
+            'title': 'Cumulative reward',
+            'ylabel': 'Episode Return',
+        },
+        'lens': {
+            'title': '(Team) steps to solution',
+            'ylabel': 'Episode length',
+        },
+    }
+
+    n_steps = 200_000
+    train_xs = np.arange(n_steps, step=n_steps // 100)
     for k in ['returns', 'lens']:
-        plt.title(k)
+        plt.title(infos[k]['title'])
+        plt.ylabel(infos[k]['ylabel'])
+        plt.xlabel('Training steps')
         for fn, results in train_results.items():
             plot_mean_std(
                 train_xs,
                 results[f'train_eval_{k}'].mean(axis=0),
                 results[f'train_eval_{k}'].std(axis=0),
-                label=fn,
+                label=train_fn_names[fn],
                 smoothing_window=10,
             )
         for fixed_policy, results in fixed_results.items():
@@ -449,9 +471,10 @@ def plot_results():
                 train_xs,
                 np.full_like(train_xs, results[k].mean()),
                 np.full_like(train_xs, results[k].std()),
-                label=fixed_policy
+                label=fixed_names[fixed_policy],
             )
         plt.legend()
+        plt.savefig(f'../images/{k}.png')
         plt.show()
 
 
