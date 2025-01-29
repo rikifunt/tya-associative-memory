@@ -38,7 +38,7 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
     Like MemoryGameEnv, but there is also:
     - a trust factor given as observation to the robot (discretized)
     - a second (human) player with a given policy and CTF for a single category (can be dynamically changed)
-    - a handover action for both players to switch roles (a=0)
+    - a handover action for both players to switch roles (a=N)
     
     When the human is playing, all their steps are condensed into a single step
     where the rewards are accumulated and given as a single value. If
@@ -50,6 +50,10 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
     reward for each step where no other reward is given, to still optimize
     for the shortest path to the goal.
     """
+
+    @property
+    def handover_action(self):
+        return self.action_space.n-1
 
     def __init__(self, game: MemoryGame, human: Player, ai_hampered_competence: float = 0, tf_levels: int = 3, max_steps=None):
         super().__init__(game, max_steps)
@@ -72,11 +76,11 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
         n_steps = 0
         while True:
             action = self.human(self.game_state)
-            if action == 0:
+            if action == self.handover_action:
                 self.steps += 1
                 trunc = self.timed_out
                 break
-            s, r, term, trunc, info = super().step(action-1)
+            s, r, term, trunc, info = super().step(action)
             R += r
             if term or trunc:
                 break
@@ -105,12 +109,12 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
         return s, info
 
     def step(self, action):
-        if action == 0:
+        if action == self.handover_action:
             # AI hands over to human
             self.steps += 1
             s, *step = self.human_steps()
         else:
-            action = hamper_competence(action-1, self.human.category, self.ai_hampered_competence)
+            action = hamper_competence(action, self.human.category, self.ai_hampered_competence)
             s, *step = super().step(action)
         return s, *step
 
@@ -118,42 +122,51 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
 
 def make_test_human(oracle, category, ctf):
     N = len(oracle)
+
     def policy(game_state: MemoryGame.State):
         # if there is no card face up, pick a random one
         if game_state.face_up == 0:
-            return 1 + np.random.choice(N)
+            return np.random.choice(N)
         
         # if a card face up is part of our category, choose its matched card
         # (the env takes care of picking a random card if the matched card is
         # still unseen)
         if game_state.face_up-1 in category:
             paired = oracle[game_state.face_up-1]
-            return 1 + (paired if np.random.rand() < ctf else np.random.choice(N))
+            return paired if np.random.rand() < ctf else np.random.choice(N)
 
         # if a card face up is not part of our category, handover
-        return 0
+        return N
+
     return Player(policy, category, ctf)
 
 
+
 def main():
-    game = MemoryGame(np.array([1, 0, 3, 2]))
+    game = MemoryGame(np.array([1, 0, 3, 2, 5, 4, 7, 6]))
     # ai_category = np.array([1, 0])
-    human = make_test_human(game.oracle, np.array([2, 3]), 1.0)
+    human = make_test_human(game.oracle, np.array([2, 3, 4, 5]), 1.0)
 
     def make_env():
         return SemanticMemoryGameEnv(game, human)
     env = make_env()
     eval_env = make_env()
 
-    n_steps = 10000
+    stats = (
+        rl.Stats.return_,
+        rl.Stats.length,
+        rl.Stats.terminated,
+    )
+
+    n_steps = 100_000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
-        alpha=0.99,
+        alpha=0.2,
         gamma=0.99,
         epsilon_schedule=epsilon_schedule
     )
 
-    random_policy_rets, random_policy_lens, random_policy_wins = rl.evals(eval_env, lambda _: np.random.choice(4), n=1000)
+    random_policy_rets, random_policy_lens, random_policy_wins = rl.evals(eval_env, lambda _: np.random.choice(env.action_space.n), stats, n=1000)
     random_policy_ret = random_policy_rets.mean()
     random_policy_len = random_policy_lens.mean()
     random_policy_wr = random_policy_wins.mean()
@@ -168,7 +181,7 @@ def main():
         # print(f'i: {i}')
         if i % 100 == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
-            rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, n=20)
+            rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
             eval_lens.append(ep_lens.mean())
             eval_wrs.append(terms.mean())
@@ -177,13 +190,15 @@ def main():
             #         print(f'[{i}] found eval WIN: ')
             epsilons.append(agent.epsilon)
             # Early stopping
-            # if terms.mean() > best_wr:
-            #     best_wr_agent = agent
-            #     best_wr = terms.mean()
+            if terms.mean() >= best_wr:
+                best_wr_agent = agent
+                best_wr = terms.mean()
     # print(f'learned Q: {agent.q.shape}')
+    # best_agent = agent
     best_agent = best_wr_agent
+    print(f'Best seen win rate: {best_wr}')
 
-    rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, n=1000)
+    rets, ep_lens, terms = rl.evals(eval_env, best_agent.best_action, stats, n=1000)
     print(f'final eval returns: {rets.mean()} +- {rets.std():.2f} (random: {random_policy_ret} +- {random_policy_rets.std():.2f})')
     print(f'final eval episode lengths: {ep_lens.mean()} +- {ep_lens.std():.2f} (random: {random_policy_len} +- {random_policy_lens.std():.2f})')
     print(f'final eval win rates: {terms.mean()} +- {terms.std():.2f} (random: {random_policy_wr} +- {random_policy_wins.std():.2f})')

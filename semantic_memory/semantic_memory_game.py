@@ -241,7 +241,7 @@ class MemoryGameEnv(gym.Env):
         if self.game.have_new_match(s, s1):
             # print("MATCH")
             return 1.0
-        return 0.0
+        return -1.0
 
     @property
     def timed_out(self):
