@@ -43,12 +43,41 @@ def episode(env: gym.Env, policy: Callable[[object], object]):
         if ts.done:
             break
 
-def eval_policy(env: gym.Env, policy: Callable[[object], object]):
-    return reduce(lambda acc, ts: (acc[0] + ts.reward, acc[1]+1, ts.term), episode(env, policy), (0, 0, None))
+class Statistic:
+    def __init__(self, op, initial):
+        self.op = op
+        self.value = initial
 
-def evals(env: gym.Env, policy: Callable[[object], object], n=10):
-    evals = np.array([eval_policy(env, policy) for _ in range(n)])
-    return evals[:,0], evals[:,1], evals[:,2]
+    def update(self, ts: TimeStep) -> 'Statistic':
+        self.value = self.op(self.value, ts)
+        return self
+
+class Stats:
+    @staticmethod
+    def return_():
+        return Statistic(lambda x, ts: x + ts.reward, 0)
+    
+    @staticmethod
+    def length():
+        return Statistic(lambda x, ts: x + 1, 0)
+
+    @staticmethod
+    def terminated():
+        return Statistic(lambda x, ts: x or ts.term, False)
+
+def eval_policy(env: gym.Env, policy: Callable[[object], object], statistics: Iterable[Statistic] = ()) -> tuple:
+    return map(
+        lambda stat: stat.value,
+        reduce(
+            lambda stats, ts: tuple(stat.update(ts) for stat in stats),
+            episode(env, policy),
+            statistics,
+        )
+    )
+
+def evals(env: gym.Env, policy: Callable[[object], object], make_stat_fns, n=10) -> tuple[np.ndarray, ...]:
+    stats = list(zip(*[eval_policy(env, policy, (make_stat() for make_stat in make_stat_fns)) for _ in range(n)]))
+    return tuple(np.array(stat) for stat in stats)
 
 T = TypeVar('T')
 

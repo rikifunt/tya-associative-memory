@@ -20,15 +20,22 @@ def main():
     env = make_env()
     eval_env = make_env()
 
+    stats = (
+        rl.Stats.return_,
+        rl.Stats.length,
+        rl.Stats.terminated,
+    )
+
     n_steps = 10000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
-        alpha=0.99,
+        alpha=0.2,
         gamma=0.99,
         epsilon_schedule=epsilon_schedule
     )
 
-    random_policy_rets, random_policy_lens, random_policy_wins = rl.evals(eval_env, lambda _: np.random.choice(4), n=1000)
+    random_policy_rets, random_policy_lens, random_policy_wins = \
+        rl.evals(eval_env, lambda _: np.random.choice(env.action_space.n), stats, n=1000)
     random_policy_ret = random_policy_rets.mean()
     random_policy_len = random_policy_lens.mean()
     random_policy_wr = random_policy_wins.mean()
@@ -43,7 +50,7 @@ def main():
         # print(f'i: {i}')
         if i % 100 == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
-            rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, n=20)
+            rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
             eval_lens.append(ep_lens.mean())
             eval_wrs.append(terms.mean())
@@ -52,13 +59,14 @@ def main():
             #         print(f'[{i}] found eval WIN: ')
             epsilons.append(agent.epsilon)
             # Early stopping
-            # if terms.mean() > best_wr:
-            #     best_wr_agent = agent
-            #     best_wr = terms.mean()
+            if terms.mean() >= best_wr:
+                best_wr_agent = agent
+                best_wr = terms.mean()
     # print(f'learned Q: {agent.q.shape}')
+    # best_agent = agent
     best_agent = best_wr_agent
 
-    rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, n=1000)
+    rets, ep_lens, terms = rl.evals(eval_env, best_agent.best_action, stats, n=1000)
     print(f'final eval returns: {rets.mean()} +- {rets.std():.2f} (random: {random_policy_ret} +- {random_policy_rets.std():.2f})')
     print(f'final eval episode lengths: {ep_lens.mean()} +- {ep_lens.std():.2f} (random: {random_policy_len} +- {random_policy_lens.std():.2f})')
     print(f'final eval win rates: {terms.mean()} +- {terms.std():.2f} (random: {random_policy_wr} +- {random_policy_wins.std():.2f})')
