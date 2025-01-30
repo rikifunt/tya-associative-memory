@@ -424,52 +424,15 @@ def get_fixed_evals():
     return fixed_results, fixed_names
 
 
-
-def eval_only_random_with_human():
-    make_env = get_make_env('mixed_team')
-    eval_env = make_env()
-
-    stats = (
-        rl.Stats.return_,
-        SemanticMemoryGameEnv.team_len,
-        rl.Stats.terminated,
-        SemanticMemoryGameEnv.team_matches,
-        SemanticMemoryGameEnv.ai_matches,
-        SemanticMemoryGameEnv.human_matches,
-        SemanticMemoryGameEnv.human_moves,
-        SemanticMemoryGameEnv.total_human_moves,
-    )
-
-    random_policy_rets, random_policy_lens, random_policy_wins, n_matches, n_hmatches, n_aimatches, hsteps, t_hsteps = \
-        rl.evals(eval_env, lambda _: np.random.choice(eval_env.action_space.n), stats, n=1000)
-
-    # TODO these metrics don't actually work (probably cause r == 1 is not always counting matches)
-    # if not (~random_policy_wins | (n_matches == (eval_env.game.n_cards // 2) - 1)).all():
-    #     print(f'WARNING: random policy did not find all matches in all episodes')
-    #     matches_on_win = n_matches[random_policy_wins]
-    #     matches_on_loss = n_matches[~random_policy_wins]
-    #     print(f'         mean matches on win: {matches_on_win.mean()} +- {matches_on_win.std()}')
-    #     print(f'         mean matches on loss: {matches_on_loss.mean()} +- {matches_on_loss.std()}')
-    #     print(f'         mean human matches on win: {n_hmatches[random_policy_wins].mean()} +- {n_hmatches[random_policy_wins].std()}')
-    #     print(f'         mean human matches on loss: {n_hmatches[~random_policy_wins].mean()} +- {n_hmatches[~random_policy_wins].std()}')
-    #     print(f'         mean ai matches on win: {n_aimatches[random_policy_wins].mean()} +- {n_aimatches[random_policy_wins].std()}')
-    #     print(f'         mean ai matches on loss: {n_aimatches[~random_policy_wins].mean()} +- {n_aimatches[~random_policy_wins].std()}')
-
-    if not (random_policy_wins | (random_policy_lens == 256)).all():
-        print(f'WARNING: random policy win and timeout inconsistency')
-        loss_lens = random_policy_lens[~random_policy_wins]
-        print(f'         mean episode length on loss: {loss_lens.mean()} +- {loss_lens.std()}')
-        print(f'         mean human steps on loss: {hsteps[~random_policy_wins].mean()} +- {hsteps[~random_policy_wins].std()}')
-        print(f'         mean total human steps on loss: {t_hsteps[~random_policy_wins].mean()} +- {t_hsteps[~random_policy_wins].std()}')
-
-    print(f'random policy returns: {random_policy_rets.mean()} +- {random_policy_rets.std()}')
-    print(f'random policy episode lengths: {random_policy_lens.mean()} +- {random_policy_lens.std()}')
-    print(f'random policy win rate: {random_policy_wins.mean()} +- {random_policy_wins.std()}')
-    print(f'random policy human steps: {hsteps.mean()} +- {hsteps.std()}')
-
-
-def smooth(x, window_len=100):
-    return np.convolve(x, np.ones(window_len)/window_len, mode='same')
+def smooth(x, window_len):
+    # return np.convolve(x, np.ones(window_len)/window_len, mode='full')
+    # running mean of window_len (or less) values
+    smoothed = np.zeros_like(x)
+    for i in range(len(x)):
+        start = max(0, i - window_len + 1)
+        smoothed[i] = np.mean(x[start:i+1])
+    assert smoothed.shape == x.shape
+    return smoothed
 
 
 def plot_mean_std(x, y, yerr, label, smoothing_window=None, color=None, ax=plt):
@@ -566,6 +529,49 @@ def plot_results():
         plt.legend()
         plt.savefig(f'../images/{k}.png')
         plt.show()
+
+
+def eval_only_random_with_human():
+    make_env = get_make_env('mixed_team')
+    eval_env = make_env()
+
+    stats = (
+        rl.Stats.return_,
+        SemanticMemoryGameEnv.team_len,
+        rl.Stats.terminated,
+        SemanticMemoryGameEnv.team_matches,
+        SemanticMemoryGameEnv.ai_matches,
+        SemanticMemoryGameEnv.human_matches,
+        SemanticMemoryGameEnv.human_moves,
+        SemanticMemoryGameEnv.total_human_moves,
+    )
+
+    random_policy_rets, random_policy_lens, random_policy_wins, n_matches, n_hmatches, n_aimatches, hsteps, t_hsteps = \
+        rl.evals(eval_env, lambda _: np.random.choice(eval_env.action_space.n), stats, n=1000)
+
+    # TODO these metrics don't actually work (probably cause r == 1 is not always counting matches)
+    # if not (~random_policy_wins | (n_matches == (eval_env.game.n_cards // 2) - 1)).all():
+    #     print(f'WARNING: random policy did not find all matches in all episodes')
+    #     matches_on_win = n_matches[random_policy_wins]
+    #     matches_on_loss = n_matches[~random_policy_wins]
+    #     print(f'         mean matches on win: {matches_on_win.mean()} +- {matches_on_win.std()}')
+    #     print(f'         mean matches on loss: {matches_on_loss.mean()} +- {matches_on_loss.std()}')
+    #     print(f'         mean human matches on win: {n_hmatches[random_policy_wins].mean()} +- {n_hmatches[random_policy_wins].std()}')
+    #     print(f'         mean human matches on loss: {n_hmatches[~random_policy_wins].mean()} +- {n_hmatches[~random_policy_wins].std()}')
+    #     print(f'         mean ai matches on win: {n_aimatches[random_policy_wins].mean()} +- {n_aimatches[random_policy_wins].std()}')
+    #     print(f'         mean ai matches on loss: {n_aimatches[~random_policy_wins].mean()} +- {n_aimatches[~random_policy_wins].std()}')
+
+    if not (random_policy_wins | (random_policy_lens == 256)).all():
+        print(f'WARNING: random policy win and timeout inconsistency')
+        loss_lens = random_policy_lens[~random_policy_wins]
+        print(f'         mean episode length on loss: {loss_lens.mean()} +- {loss_lens.std()}')
+        print(f'         mean human steps on loss: {hsteps[~random_policy_wins].mean()} +- {hsteps[~random_policy_wins].std()}')
+        print(f'         mean total human steps on loss: {t_hsteps[~random_policy_wins].mean()} +- {t_hsteps[~random_policy_wins].std()}')
+
+    print(f'random policy returns: {random_policy_rets.mean()} +- {random_policy_rets.std()}')
+    print(f'random policy episode lengths: {random_policy_lens.mean()} +- {random_policy_lens.std()}')
+    print(f'random policy win rate: {random_policy_wins.mean()} +- {random_policy_wins.std()}')
+    print(f'random policy human steps: {hsteps.mean()} +- {hsteps.std()}')
 
 
 def main():
