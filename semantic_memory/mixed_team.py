@@ -13,6 +13,7 @@ from gymnasium import spaces
 
 import rl
 from semantic_memory_game import MemoryGame, MemoryGameEnv
+from humans import medium, policy_bridge
 
 
 def hamper_competence(card, category, competence, n_cards):
@@ -244,6 +245,22 @@ def make_test_human(oracle, category, ctf):
     return Player(policy, category, ctf)
 
 
+def make_llm_human(category, ctf_level):
+    assert ctf_level == 1 # medium (0.5 ctf)
+    card_contents = [None]*8
+    human_category = ["France", "Paris", "Italy", "Rome"]
+    ai_category = ["7*8", "2*(5-3)", "56", "4"]
+    for i, card in enumerate(category):
+        card_contents[card] = human_category[i]
+    for i in range(8):
+        if card_contents[i] is None:
+            card_contents[i] = ai_category.pop()
+    
+    policy = policy_bridge.PolicyBridge(card_contents, medium.human_action)
+    human = Player(policy, category, 0.5)
+    return human
+
+
 # Experiments
 
 def get_make_env(env_id):
@@ -251,6 +268,11 @@ def get_make_env(env_id):
     human_category = np.array([2, 3, 4, 5])
 
     if env_id == 'mixed_team':
+        def make_env():
+            return SemanticMemoryGameEnv(game, make_llm_human(human_category, 1))
+        return make_env
+
+    if env_id == 'mixed_team_test':
         def make_env():
             return SemanticMemoryGameEnv(game, make_test_human(game.oracle, human_category, 1.0))
         return make_env
@@ -264,10 +286,15 @@ def get_make_env(env_id):
         def make_env():
             return MemoryGameEnv(game)
         return make_env
-    
-    if env_id == 'human_only':
+
+    if env_id == 'test_human_only':
         def make_env():
             return HumanOnlySemanticMemoryGameEnv(game, make_test_human(game.oracle, human_category, 1.0))
+        return make_env
+
+    if env_id == 'human_only':
+        def make_env():
+            return HumanOnlySemanticMemoryGameEnv(game, make_llm_human(human_category, 1))
         return make_env
 
     raise ValueError(f'Unknown env_id: {env_id}')
@@ -360,12 +387,6 @@ def run_and_save_trials(n_trials, env_id):
     }
     np.savez(f'../results/{env_id}_results.npz', **results)
     return results
-
-
-def get_fixed_policy_config(fixed_policy_id):
-    if fixed_policy_id == 'random':
-        return lambda _: np.random.choice(2)
-    raise ValueError(f'Unknown fixed_policy_id: {fixed_policy_id}')
 
 
 def eval_fixed_pi(pi_id):

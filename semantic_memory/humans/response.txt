@@ -1,3 +1,6 @@
+Here’s a Python function that simulates a human-like player with the described attributes. It incorporates the "medium" knowledge of capitals and nations, "bad" knowledge of math operations, and "high trust" in the partner. The behavior is designed with some randomness to simulate human-like decision-making while considering the given attributes.
+
+```python
 import random
 
 def human_action(state):
@@ -62,3 +65,18 @@ def human_action(state):
 
     # If no better choice, just hand over the task to the partner
     return 9
+```
+
+### Key Aspects of the Code:
+1. **Knowledge Levels**: The function adjusts behavior based on knowledge level:
+   - **Medium Knowledge**: The human can recognize some capital-nation pairs, but not all.
+   - **Bad Knowledge**: The human has little ability to solve mathematical operations.
+
+2. **Trust Level**: High trust in the partner means a higher likelihood (70%) to hand over the task to the partner if the human doesn’t have a clear course of action. The randomness here simulates a human's decision-making when unsure.
+
+3. **Decision Making**: 
+   - If there’s an uncovered card, the player tries to match it with their knowledge.
+   - If no immediate matches exist, the player will either uncover a random card or hand over to the partner.
+   - If all cards are unsolved and no immediate actions are possible, handing the task to the partner is a likely choice.
+
+This function encapsulates a human-like approach, balancing knowledge, trust in the partner, and some randomness in decision-making.
