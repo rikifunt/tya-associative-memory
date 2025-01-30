@@ -26,6 +26,10 @@ class MemoryGame:
             return MemoryGame.State(seen=self.seen.copy(), face_up=self.face_up)
 
         @property
+        def n_solved(self) -> int:
+            return np.sum(self.seen == MemoryGame.CardState.SOLVED)
+
+        @property
         def solved(self) -> bool:
             return (self.seen == MemoryGame.CardState.SOLVED).all()
 
@@ -45,26 +49,28 @@ class MemoryGame:
     def reset(self, seed=None) -> State:
         return MemoryGame.State(np.full(self.n_cards, MemoryGame.CardState.UNSEEN), 0)
 
-    # TODO try having 1 special action for turn random card, and make invalid
-    # turning up unseen cards (no-op)
     def step(self, state: State, action: int) -> State:
         seen, face_up = state
-        if (seen == MemoryGame.CardState.SOLVED).all():
+        if state.solved:
             # Game is over (all cards are solved)
             # print(f'[Game] All cards are solved')
             return state.copy()
 
-        if action == (face_up-1) or seen[action] == MemoryGame.CardState.SOLVED:
+        if action == (face_up-1) or action < self.n_cards and seen[action] in {MemoryGame.CardState.SOLVED, MemoryGame.CardState.UNSEEN}:
             # Do nothing (invalid action)
-            # print(f'[Game] Card {action} is already face up or solved')
+            # print(f'[Game] Card {action} is unseen or solved')
             return state.copy()
 
-        # Action is valid: turn card face up (if unseen card chosen, randomize
-        # the choice)
+        # Action is valid: turn card face up
 
-        if seen[action] == MemoryGame.CardState.UNSEEN:
+        if action == self.n_cards:
             # Choose a random unseen card
-            action = np.random.choice(np.where(seen == MemoryGame.CardState.UNSEEN)[0])
+            unseen_cards = np.where(seen == MemoryGame.CardState.UNSEEN)[0]
+            if len(unseen_cards) == 0:
+                # No unseen cards left, invalid action
+                # print(f'[Game] No unseen cards left')
+                return state.copy()
+            action = np.random.choice(unseen_cards)
             # print(f'[Game] choosing random unseen card: {action}')
 
         return self.turn_face_up(state, action)
@@ -75,23 +81,26 @@ class MemoryGame:
 
         next_seen, next_face_up = state.copy()
         # Mark the card to be turned face up as seen
+        # print(f'[Game] Turning card {card} face up')
         next_seen[card] = MemoryGame.CardState.SEEN
 
         # If there is no face up card, turn this card face up
         if face_up == 0:
+            # print(f'[Game] No other card face up, turning card {card} face up')
             next_face_up = card + 1
             return MemoryGame.State(next_seen, next_face_up)
 
         # If there are two face up cards, check if they match
         assert seen[face_up-1] == MemoryGame.CardState.SEEN
         if self.oracle[face_up-1] == card:
+            # print(f'[Game] Cards {face_up-1} and {card} match')
             next_seen[face_up-1] = next_seen[card] = MemoryGame.CardState.SOLVED
         next_face_up = 0
         return MemoryGame.State(next_seen, next_face_up)
 
-    def have_new_match(self, state: np.ndarray[int], next_state: np.ndarray[int]) -> bool:
+    def have_new_match(self, state: State, next_state: State) -> bool:
         # number of solved cards increased
-        return np.sum(next_state == MemoryGame.CardState.SOLVED) > np.sum(state == MemoryGame.CardState.SOLVED)
+        return next_state.n_solved > state.n_solved
 
 
 @dataclass
@@ -195,9 +204,12 @@ class InteractiveMatch:
                 action = None
                 if event.type == pygame.MOUSEBUTTONDOWN:
                     card = self.cursor_to_card(*event.pos)
-                    # print('[RENDER] Chosen card:', card)
+                    print('[RENDER] Chosen card:', card)
                     if card < self.game.n_cards:
                         action = card
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_SPACE:
+                        action = self.game.n_cards
                 if action is not None:
                     state = self.game.step(state, action)
                     if state.solved:
@@ -227,7 +239,7 @@ class MemoryGameEnv(gym.Env):
         N = self.game.n_cards
         self.max_steps = max_steps if max_steps is not None else 2**N
         self.observation_space = spaces.Discrete((N+1) * 3**N)
-        self.action_space = spaces.Discrete(N)
+        self.action_space = spaces.Discrete(1 + N)
         self.game_state = None
         self.steps = None
 
@@ -237,10 +249,12 @@ class MemoryGameEnv(gym.Env):
 
     def reward(self, s, s1):
         if s1.solved:
+            # print("SOLVED")
             return 100.0
         if self.game.have_new_match(s, s1):
             # print("MATCH")
             return 1.0
+        # print("NO MATCH")
         return -1.0
 
     @property
@@ -251,6 +265,7 @@ class MemoryGameEnv(gym.Env):
         # print(f'[env] reset')
         self.game_state = self.game.reset()
         self.steps = 0
+        self.n_matches = 0
         # print(f'[GAME] END RESET')
         return self.observe(), {}
 
@@ -262,6 +277,9 @@ class MemoryGameEnv(gym.Env):
         term = self.game_state.solved
         # print(f'[GAME] steps: {self.steps}, max_steps: {self.max_steps}, term: {term}, trunc: {self.timed_out}')
         # print(f'[env] state is None: {self.game_state is None}, term: {term}')
+        if self.game.have_new_match(last_state, self.game_state):
+            self.n_matches += 1
+        assert not term or self.n_matches == self.game.n_cards // 2
         return self.observe(), self.reward(last_state, self.game_state), term, self.timed_out, {}
 
 # from gymnasium.envs.registration import register

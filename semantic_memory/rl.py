@@ -35,6 +35,7 @@ def steps(env: gym.Env, policy: Callable[[object], object]):
         next_state, reward, term, trunc, next_info = env.step(action)
         yield TimeStep(state, action, next_state, reward, term, trunc, info, next_info)
         state = next_state
+        info = next_info
 
 def episode(env: gym.Env, policy: Callable[[object], object]):
     # Can't use take while here because we need to yield the last step
@@ -127,7 +128,8 @@ class TabularQLearning:
             return self.algo.epsilon_schedule(self.steps)
 
         def best_action(self, s):
-            return np.argmax(self.q[s])
+            return np.random.choice(np.flatnonzero(self.q[s] == self.q[s].max()))
+            # return np.argmax(self.q[s])
 
         def epsilon_greedy_action(self, s):
             if np.random.rand() < self.epsilon:
