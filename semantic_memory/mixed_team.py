@@ -33,6 +33,34 @@ class HamperedAISemanticMemoryGameEnv(MemoryGameEnv):
         return super().step(action)
 
 
+class HumanOnlySemanticMemoryGameEnv(MemoryGameEnv):
+
+    def __init__(self, game, human, max_steps=None):
+        super().__init__(game, max_steps)
+        self.human = human
+
+    def observe(self):
+        return self.game_state
+
+    def step(self, action):
+        # override human handover
+        if action == self.action_space.n:
+            # this is apparently worse than random :|
+            # if np.random.rand() < 0.5:
+            #     # random seen face down card
+            #     seen_face_down = \
+            #         (self.game_state.seen == MemoryGame.CardState.SEEN) \
+            #         & (self.game_state.face_up-1 == np.arange(self.game.n_cards))
+            #     if seen_face_down.any():
+            #         action = np.random.choice(np.where(seen_face_down)[0])
+            #     else:
+            #         # random unseen card
+            #         action = self.game.n_cards
+            # else:
+            #     # random unseen card
+            #     action = self.game.n_cards
+            action = np.random.choice(self.game.n_cards+1)
+        return super().step(action)
 
 
 @dataclass
@@ -237,6 +265,11 @@ def get_make_env(env_id):
             return MemoryGameEnv(game)
         return make_env
     
+    if env_id == 'human_only':
+        def make_env():
+            return HumanOnlySemanticMemoryGameEnv(game, make_test_human(game.oracle, human_category, 1.0))
+        return make_env
+
     raise ValueError(f'Unknown env_id: {env_id}')
 
 
@@ -329,13 +362,25 @@ def run_and_save_trials(n_trials, env_id):
     return results
 
 
-def eval_only_human():
-    pass
+def get_fixed_policy_config(fixed_policy_id):
+    if fixed_policy_id == 'random':
+        return lambda _: np.random.choice(2)
+    raise ValueError(f'Unknown fixed_policy_id: {fixed_policy_id}')
 
 
-def eval_only_random():
-    make_env = get_make_env('omniscent_ai_only')
-    eval_env = make_env()
+def eval_fixed_pi(pi_id):
+    if pi_id == 'random':
+        make_env = get_make_env('omniscent_ai_only')
+        env = make_env()
+        policy = lambda _: np.random.choice(env.action_space.n)
+    elif pi_id == 'human':
+        make_env = get_make_env('human_only')
+        env = make_env()
+        policy = env.human.policy
+    else:
+        raise ValueError(f'Unknown pi_id: {pi_id}')
+
+    print(f'Evaluating {pi_id} fixed policy')
 
     stats = (
         rl.Stats.return_,
@@ -344,21 +389,40 @@ def eval_only_random():
         SemanticMemoryGameEnv.team_matches,
     )
 
-    random_policy_rets, random_policy_lens, random_policy_wins, n_matches = \
-        rl.evals(eval_env, lambda _: np.random.choice(eval_env.action_space.n), stats, n=1000)
+    results = rl.evals(env, policy, stats, n=1000)
+    rets, lens, wins, n_matches = results
 
-    if not (~random_policy_wins | (n_matches == (eval_env.game.n_cards // 2) - 1)).all():
-        print(f'WARNING: random policy did not find all matches in all episodes')
-        matches_on_win = n_matches[random_policy_wins]
-        matches_on_loss = n_matches[~random_policy_wins]
+    if not (~wins | (n_matches == (env.game.n_cards // 2) - 1)).all():
+        print(f'WARNING: policy did not find all matches in all episodes')
+        matches_on_win = n_matches[wins]
+        matches_on_loss = n_matches[~wins]
         print(f'         mean matches on win: {matches_on_win.mean()} +- {matches_on_win.std()}')
         print(f'         mean matches on loss: {matches_on_loss.mean()} +- {matches_on_loss.std()}')
 
+    for stat, result in zip(stats, results):
+        print(f'  {stat.__name__}: {result.mean()} +- {result.std()}')
+
     return {
-        'returns': random_policy_rets,
-        'lens': random_policy_lens,
-        'wrs': random_policy_wins
+        'returns': rets,
+        'lens': lens,
+        'wrs': wins
     }
+
+def get_fixed_evals():
+    fixed_evals = [
+        'random',
+        'human',
+    ]
+    fixed_results = {
+        k: eval_fixed_pi(k)
+        for k in fixed_evals
+    }
+    fixed_names = {
+        'random': 'Random policy',
+        'human': 'Human policy',
+    }
+    return fixed_results, fixed_names
+
 
 
 def eval_only_random_with_human():
@@ -404,7 +468,6 @@ def eval_only_random_with_human():
     print(f'random policy human steps: {hsteps.mean()} +- {hsteps.std()}')
 
 
-
 def smooth(x, window_len=100):
     return np.convolve(x, np.ones(window_len)/window_len, mode='same')
 
@@ -437,16 +500,7 @@ def print_evals():
         'mixed_team': 'AI (partial competence) + human',
     }
 
-    fixed_evals = [
-        'random'
-    ]
-    fixed_results = {
-        k: globals()[f'eval_only_{k}']()
-        for k in fixed_evals
-    }
-    fixed_names = {
-        'random': 'Random policy',
-    }
+    fixed_results, fixed_names = get_fixed_evals()
 
     for fn, results in train_results.items():
         print(f'{train_fn_names[fn]}:')
@@ -475,16 +529,7 @@ def plot_results():
         'mixed_team': 'AI (partial competence) + human',
     }
 
-    fixed_evals = [
-        'random'
-    ]
-    fixed_results = {
-        k: globals()[f'eval_only_{k}']()
-        for k in fixed_evals
-    }
-    fixed_names = {
-        'random': 'Random policy',
-    }
+    fixed_results, fixed_names = get_fixed_evals()
 
     infos = {
         'returns': {
@@ -534,24 +579,33 @@ def main():
 
 
 if __name__ == "__main__":
-    # one CLI arg telling which train function, or 'plot'
     import sys
-    if len(sys.argv) != 2:
-        print('Usage: python mixed_team.py <cmd>')
+    if len(sys.argv) not in {2,3}:
+        print('Wrong number of arguments')
         sys.exit(1)
 
     if sys.argv[1] == 'plot':
+        assert len(sys.argv) == 2
         plot_results()
         sys.exit(0)
 
     if sys.argv[1] == 'print':
+        assert len(sys.argv) == 2
         print_evals()
         sys.exit(0)
 
-    if sys.argv[1] == 'test':
-        eval_only_random_with_human()
+    if sys.argv[1] == 'eval':
+        assert len(sys.argv) == 3
+        eval_fixed_pi(sys.argv[2])
         sys.exit(0)
 
-    run_and_save_trials(5, sys.argv[1])
+    if sys.argv[1] == 'train':
+        assert len(sys.argv) == 3
+        run_and_save_trials(5, sys.argv[2])
+        sys.exit(0)
 
+    if sys.argv[1] == 'test':
+        assert len(sys.argv) == 2
+        eval_only_random_with_human()
+        sys.exit(0)
 
