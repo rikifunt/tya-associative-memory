@@ -5,8 +5,8 @@ from typing import Callable, Iterable, Iterator, NamedTuple, TypeVar
 from tqdm import tqdm
 from matplotlib import pyplot as plt
 # uncomment for headless
-import matplotlib
-matplotlib.use("Agg")
+# import matplotlib
+# matplotlib.use("Agg")
 import numpy as np
 import pygame
 import math
@@ -107,18 +107,20 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
 
     def human_steps(self):
         # return value if human handover is immediate
-        s, R, term, trunc, info = self.observe(), 0, False, False, {}
+        s, R, term, trunc, info = self.observe(), -2.0, False, False, {}
         n_steps = 0
         n_matches = 0
         while True:
             action = self.human(self.game_state)
             if action == self.handover_action:
+                # print(f'[H] handover\n')
                 n_steps += 1
                 self.total_human_steps += 1
                 self.steps += 1
                 trunc = self.timed_out
                 break
             s, r, term, trunc, info = super().step(action)
+            # print(f'[H] action: {action}\n')
             n_steps += 1
             self.total_human_steps += 1
             if r == 1.0 or r == 100.0:
@@ -159,11 +161,13 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
     def step(self, action):
         if action == self.handover_action:
             # AI hands over to human
+            # print(f'[AI] handover\n')
             self.steps += 1
             s, *step = self.human_steps()
         else:
             action = hamper_competence(action, self.human.category, self.ai_hampered_competence, self.game.n_cards)
             s, *step = super().step(action)
+            # print(f'[AI] action: {action}\n')
             step[3]['match'] = 1 if step[0] == 1.0 or step[0] == 100.0 else 0
         step[3]['total_human_steps'] = self.total_human_steps
         return s, *step
@@ -179,6 +183,14 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
     # @staticmethod
     # def team_matches():
     #     return rl.Statistic(lambda n, ts: n + ts.info.get('human_matches', 0) + int(ts.reward == 1.0), 0)
+
+    @staticmethod
+    def ai_matches():
+        return rl.Statistic(lambda n, ts: n + ts.next_info.get('match', 0), 0)
+    
+    @staticmethod
+    def human_matches():
+        return rl.Statistic(lambda n, ts: n + ts.next_info.get('match', 0) + ts.info.get('initial_human_matches', 0), 0)
 
     @staticmethod
     def team_matches():
@@ -226,6 +238,11 @@ class TrustAwareSMGEnv(SemanticMemoryGameEnv):
         self.human = np.random.choice(self.humans)
         s, info = super().reset(seed, options)
         return s, info
+
+
+class TrustUnawareSMGEnv(TrustAwareSMGEnv):
+    def observe(self):
+        return MemoryGameEnv.observe(self)
 
 
 def make_test_human(oracle, category, ctf):
@@ -298,6 +315,11 @@ def get_make_env(env_id):
             return TrustAwareSMGEnv(game, llm_humans)
         return make_env
 
+    if env_id == 'mixed_team_no_ctf':
+        def make_env():
+            return TrustUnawareSMGEnv(game, llm_humans)
+        return make_env
+
     if env_id == 'mixed_team_high_human':
         def make_env():
             return SemanticMemoryGameEnv(game, llm_humans[1])
@@ -345,17 +367,19 @@ def train(env_id):
     make_env = get_make_env(env_id)
     env = make_env()
     eval_env = make_env()
-    # eval_env_high = get_make_env('mixed_team_high_human')()
-    # eval_env_low = get_make_env('mixed_team_low_human')()
+    eval_env_high = get_make_env('mixed_team_high_human')()
+    eval_env_low = get_make_env('mixed_team_low_human')()
 
     stats = (
         SemanticMemoryGameEnv.team_return,
         SemanticMemoryGameEnv.team_len, # also counts human steps
         rl.Stats.terminated,
         # SemanticMemoryGameEnv.human_moves,
+        SemanticMemoryGameEnv.ai_matches,
+        SemanticMemoryGameEnv.human_matches,
     )
 
-    n_steps = 200_000
+    n_steps = 400_000
     epsilon_schedule = rl.TabularQLearning.exponential_epsilon_decay(epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=n_steps)
     algo = rl.TabularQLearning(
         alpha=0.2,
@@ -363,12 +387,14 @@ def train(env_id):
         epsilon_schedule=epsilon_schedule
     )
 
-    random_policy_rets, random_policy_lens, random_policy_wins = \
+    random_policy_rets, random_policy_lens, random_policy_wins, random_policy_ai_matches, random_policy_human_matches = \
         rl.evals(eval_env, lambda _: np.random.choice(env.action_space.n), stats, n=1000)
     random_policy_ret = random_policy_rets.mean()
     random_policy_len = random_policy_lens.mean()
     random_policy_wr = random_policy_wins.mean()
     # random_policy_hsteps = random_policy_hsteps.mean()
+    random_policy_ai_matches = random_policy_ai_matches.mean()
+    random_policy_hmatches = random_policy_human_matches.mean()
 
     eval_returns = []
     eval_lens = []
@@ -382,7 +408,7 @@ def train(env_id):
         # print(f'i: {i}')
         if i % (n_steps // 100) == 0:
             # evals.append(eval_policy(eval_env, agent.best_action))
-            rets, ep_lens, terms = rl.evals(eval_env, agent.best_action, stats, n=20)
+            rets, ep_lens, terms, *_ = rl.evals(eval_env, agent.best_action, stats, n=20)
             eval_returns.append(rets.mean())
             eval_lens.append(ep_lens.mean())
             eval_wrs.append(terms.mean())
@@ -404,31 +430,53 @@ def train(env_id):
     print(f'Best seen win rate: {best_wr}')
     print(f'Best seen episode length: {best_len}')
 
-    rets, ep_lens, terms = rl.evals(eval_env, best_agent.best_action, stats, n=1000)
+    rets, ep_lens, terms, ai_matches, human_matches = rl.evals(eval_env, best_agent.best_action, stats, n=1000)
     print(f'final eval returns: {rets.mean()} +- {rets.std():.2f} (random: {random_policy_ret} +- {random_policy_rets.std():.2f})')
     print(f'final eval episode lengths: {ep_lens.mean()} +- {ep_lens.std():.2f} (random: {random_policy_len} +- {random_policy_lens.std():.2f})')
     print(f'final eval win rates: {terms.mean()} +- {terms.std():.2f} (random: {random_policy_wr} +- {random_policy_wins.std():.2f})')
     # print(f'final eval human steps: {hsteps.mean()} +- {hsteps.std():.2f} (random: {random_policy_hsteps} +- {random_policy_hsteps.std():.2f})')
+    print(f'final eval ai matches: {ai_matches.mean()} +- {ai_matches.std():.2f} (random: {random_policy_ai_matches} +- {random_policy_ai_matches.std():.2f})')
+    print(f'final eval human matches: {human_matches.mean()} +- {human_matches.std():.2f} (random: {random_policy_hmatches} +- {random_policy_hmatches.std():.2f})')
 
-    # rets_high, ep_lens_high, terms_high, hsteps_high = rl.evals(eval_env_high, best_agent.best_action, stats, n=1000)
-    # print(f'final eval returns (high): {rets_high.mean()} +- {rets_high.std():.2f}')
-    # print(f'final eval episode lengths (high): {ep_lens_high.mean()} +- {ep_lens_high.std():.2f}')
-    # print(f'final eval win rates (high): {terms_high.mean()} +- {terms_high.std():.2f}')
-    # print(f'final eval human steps (high): {hsteps_high.mean()} +- {hsteps_high.std():.2f}')
+    if 'mixed_team' in env_id:
+        rets_high, ep_lens_high, terms_high, ai_matches, human_matches = rl.evals(eval_env_high, best_agent.best_action, stats, n=1000)
+        print(f'final eval returns (high): {rets_high.mean()} +- {rets_high.std():.2f}')
+        print(f'final eval episode lengths (high): {ep_lens_high.mean()} +- {ep_lens_high.std():.2f}')
+        print(f'final eval win rates (high): {terms_high.mean()} +- {terms_high.std():.2f}')
+        # print(f'final eval human steps (high): {hsteps_high.mean()} +- {hsteps_high.std():.2f}')
+        print(f'final eval ai matches (high): {ai_matches.mean()} +- {ai_matches.std():.2f}')
+        print(f'final eval human matches (high): {human_matches.mean()} +- {human_matches.std():.2f}')
 
-    # rets_low, ep_lens_low, terms_low, hsteps_low = rl.evals(eval_env_low, best_agent.best_action, stats, n=1000)
-    # print(f'final eval returns (low): {rets_low.mean()} +- {rets_low.std():.2f}')
-    # print(f'final eval episode lengths (low): {ep_lens_low.mean()} +- {ep_lens_low.std():.2f}')
-    # print(f'final eval win rates (low): {terms_low.mean()} +- {terms_low.std():.2f}')
-    # print(f'final eval human steps (low): {hsteps_low.mean()} +- {hsteps_low.std():.2f}')
+        rets_low, ep_lens_low, terms_low, ai_matches, human_matches = rl.evals(eval_env_low, best_agent.best_action, stats, n=1000)
+        print(f'final eval returns (low): {rets_low.mean()} +- {rets_low.std():.2f}')
+        print(f'final eval episode lengths (low): {ep_lens_low.mean()} +- {ep_lens_low.std():.2f}')
+        print(f'final eval win rates (low): {terms_low.mean()} +- {terms_low.std():.2f}')
+        # print(f'final eval human steps (low): {hsteps_low.mean()} +- {hsteps_low.std():.2f}')
+        print(f'final eval ai matches (low): {ai_matches.mean()} +- {ai_matches.std():.2f}')
+        print(f'final eval human matches (low): {human_matches.mean()} +- {human_matches.std():.2f}')
 
     results = {
         'train_eval_returns': eval_returns,
         'train_eval_lens': eval_lens,
         'train_eval_wrs': eval_wrs,
+        
         'eval_rets': rets,
         'eval_lens': ep_lens,
-        'eval_terms': terms
+        'eval_terms': terms,
+        'eval_ai_matches': ai_matches,
+        'eval_human_matches': human_matches,
+        
+        'eval_rets_high': rets_high,
+        'eval_lens_high': ep_lens_high,
+        'eval_terms_high': terms_high,
+        'eval_ai_matches_high': ai_matches,
+        'eval_human_matches_high': human_matches,
+
+        'eval_rets_low': rets_low,
+        'eval_lens_low': ep_lens_low,
+        'eval_terms_low': terms_low,
+        'eval_ai_matches_low': ai_matches,
+        'eval_human_matches_low': human_matches,
     }
     return results
 
@@ -466,19 +514,19 @@ def eval_fixed_pi(pi_id):
         rl.Stats.return_,
         SemanticMemoryGameEnv.team_len,
         rl.Stats.terminated,
-        SemanticMemoryGameEnv.team_matches,
+        # SemanticMemoryGameEnv.team_matches,
         SemanticMemoryGameEnv.invalid_actions,
     )
 
     results = rl.evals(env, policy, stats, n=1000)
-    rets, lens, wins, n_matches, n_invalid = results
+    rets, lens, wins, n_invalid = results
 
-    if not (~wins | (n_matches == (env.game.n_cards // 2) - 1)).all():
-        print(f'WARNING: policy did not find all matches in all episodes')
-        matches_on_win = n_matches[wins]
-        matches_on_loss = n_matches[~wins]
-        print(f'         mean matches on win: {matches_on_win.mean()} +- {matches_on_win.std()}')
-        print(f'         mean matches on loss: {matches_on_loss.mean()} +- {matches_on_loss.std()}')
+    # if not (~wins | (n_matches == (env.game.n_cards // 2))).all():
+    #     print(f'WARNING: policy did not find all matches in all episodes')
+    #     matches_on_win = n_matches[wins]
+    #     matches_on_loss = n_matches[~wins]
+    #     print(f'         mean matches on win: {matches_on_win.mean()} +- {matches_on_win.std()}')
+    #     print(f'         mean matches on loss: {matches_on_loss.mean()} +- {matches_on_loss.std()}')
 
     for stat, result in zip(stats, results):
         print(f'  {stat.__name__}: {result.mean()} +- {result.std()}')
@@ -534,7 +582,11 @@ def print_evals():
     train_env_ids = [
         # 'omniscent_ai_only',
         # 'partial_ai_only',
-        'mixed_team',
+        # 'mixed_team',
+        'mixed_team_ctf',
+        'mixed_team_no_ctf',
+        # 'mixed_team_high_human',
+        # 'mixed_team_low_human',
     ]
     train_results = {
         fn: np.load(f'../results/{fn}_results.npz')
@@ -543,7 +595,11 @@ def print_evals():
     train_fn_names = {
         'omniscent_ai_only': 'AI only (omniscent)',
         'partial_ai_only': 'AI only (partial competence)',
-        'mixed_team': 'AI (partial competence) + human',
+        # 'mixed_team': 'AI (partial competence) + human',
+        'mixed_team_ctf': 'AI-CTF (partial competence) + human',
+        'mixed_team_no_ctf': 'AI (partial competence) + human',
+        'mixed_team_high_human': 'AI (partial competence) + good human',
+        'mixed_team_low_human': 'AI (partial competence) + bad human',
     }
 
     fixed_results, fixed_names = get_fixed_evals()
@@ -564,9 +620,10 @@ def plot_results():
         # 'omniscent_ai_only',
         # 'partial_ai_only',
         # 'mixed_team',
-        # 'mixed_team_ctf',
-        'mixed_team_high_human',
-        'mixed_team_low_human',
+        'mixed_team_ctf',
+        'mixed_team_no_ctf',
+        # 'mixed_team_high_human',
+        # 'mixed_team_low_human',
     ]
     train_results = {
         fn: np.load(f'../results/{fn}_results.npz')
@@ -576,6 +633,7 @@ def plot_results():
         'omniscent_ai_only': 'AI only (omniscent)',
         'partial_ai_only': 'AI only (partial competence)',
         'mixed_team_ctf': 'AI-CTF (partial competence) + human',
+        'mixed_team_no_ctf': 'AI (partial competence) + human',
         'mixed_team_high_human': 'AI (partial competence) + good human',
         'mixed_team_low_human': 'AI (partial competence) + bad human',  
     }
@@ -593,7 +651,7 @@ def plot_results():
         },
     }
 
-    n_steps = 200_000
+    n_steps = 400_000
     train_xs = np.arange(n_steps, step=n_steps // 100)
     for k in ['returns', 'lens']:
         plt.title(infos[k]['title'])
@@ -616,8 +674,8 @@ def plot_results():
             )
         plt.legend()
         plt.savefig(f'../images/{k}.png')
-        # plt.show()
-        plt.close()
+        plt.show()
+        # plt.close()
 
 
 def eval_only_random_with_human():
@@ -659,9 +717,19 @@ def eval_only_random_with_human():
         # print(f'         mean total human steps on loss: {t_hsteps[~random_policy_wins].mean()} +- {t_hsteps[~random_policy_wins].std()}')
 
     # G = -len + win*100 + (n_matches+win)
-    expected_rets = -lens + wins*100 + n_matches
+    expected_rets = -lens + wins*(100+1) + 2*(n_matches-1)
     if not (team_rets == expected_rets).all():
         print(f'WARNING: random policy team return inconsistency')
+        print(f'         difference (mean +- std): {np.mean(team_rets - expected_rets)} +- {np.std(team_rets - expected_rets)}')
+        print(f'         mean return: {rets.mean()} +- {rets.std()}')
+        print(f'         mean team return: {team_rets.mean()} +- {team_rets.std()}')
+        print(f'         mean expected return: {expected_rets.mean()} +- {expected_rets.std()}')
+        print(f'         mean human steps: {hmoves.mean()} +- {hmoves.std()}')
+        print(f'         mean episode length: {lens.mean()} +- {lens.std()}')
+        print(f'         mean matches: {n_matches.mean()} +- {n_matches.std()}')
+
+        example_win = np.where(wins)[0][0]
+        print(f'         example win: {example_win}, return: {team_rets[example_win]}, expected: {expected_rets[example_win]}, human steps: {hmoves[example_win]}, episode length: {lens[example_win]}, matches: {n_matches[example_win]}')
         # print(f'         mean return: {random_policy_rets.mean()} +- {random_policy_rets.std()}')
         # print(f'         mean expected return: {expected_rets.mean()} +- {expected_rets.std()}')
 

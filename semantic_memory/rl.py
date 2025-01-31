@@ -50,7 +50,10 @@ class Statistic:
         self.value = initial
 
     def update(self, ts: TimeStep) -> 'Statistic':
+        old_value = self.value
         self.value = self.op(self.value, ts)
+        # print(f'[STAT,{self.op.__qualname__}] {old_value} -> {self.value}')
+        # print(f'[STAT,{self.op.__qualname__}] {ts}\n')
         return self
 
 class Stats:
