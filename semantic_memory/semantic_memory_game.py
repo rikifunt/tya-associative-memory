@@ -25,6 +25,9 @@ class MemoryGame:
         def copy(self):
             return MemoryGame.State(seen=self.seen.copy(), face_up=self.face_up)
 
+        def __eq__(self, other: 'MemoryGame.State') -> bool:
+            return (self.seen == other.seen).all() and self.face_up == other.face_up
+
         @property
         def n_solved(self) -> int:
             return np.sum(self.seen == MemoryGame.CardState.SOLVED)

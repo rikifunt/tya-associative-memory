@@ -22,8 +22,9 @@ class PolicyBridge:
         state.append(face_up)
 
         assert all(isinstance(card, str) for card in state), f'Expected all cards to be strings, got {state}'
-        action = self.raw_policy(state)
+        action = self.raw_policy({i: card for i, card in enumerate(state)})
         # TODO filter invalid actions?
+        # print(f"PolicyBridge: {state} -> {action}")
         return action
 
 

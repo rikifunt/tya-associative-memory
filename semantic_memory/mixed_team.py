@@ -4,6 +4,9 @@ from typing import Callable, Iterable, Iterator, NamedTuple, TypeVar
 
 from tqdm import tqdm
 from matplotlib import pyplot as plt
+# uncomment for headless
+# import matplotlib
+# matplotlib.use("Agg")
 import numpy as np
 import pygame
 import math
@@ -13,7 +16,7 @@ from gymnasium import spaces
 
 import rl
 from semantic_memory_game import MemoryGame, MemoryGameEnv
-from humans import medium, policy_bridge
+from humans import high as high_human, policy_bridge
 
 
 def hamper_competence(card, category, competence, n_cards):
@@ -61,6 +64,8 @@ class HumanOnlySemanticMemoryGameEnv(MemoryGameEnv):
             #     # random unseen card
             #     action = self.game.n_cards
             action = np.random.choice(self.game.n_cards+1)
+            # print(f'Overriding handover to {action}')
+        # print(f'action: {action}')
         return super().step(action)
 
 
@@ -206,6 +211,10 @@ class SemanticMemoryGameEnv(MemoryGameEnv):
     def total_human_moves():
         return rl.Statistic(lambda n, ts: ts.next_info.get('total_human_steps', -1), -2)
 
+    @staticmethod
+    def invalid_actions():
+        return rl.Statistic(lambda n, ts: n + int(ts.state == ts.next_state), 0)
+
 
 
 def make_test_human(oracle, category, ctf):
@@ -256,7 +265,7 @@ def make_llm_human(category, ctf_level):
         if card_contents[i] is None:
             card_contents[i] = ai_category.pop()
     
-    policy = policy_bridge.PolicyBridge(card_contents, medium.human_action)
+    policy = policy_bridge.PolicyBridge(card_contents, high_human.humanDecision)
     human = Player(policy, category, 0.5)
     return human
 
@@ -408,10 +417,11 @@ def eval_fixed_pi(pi_id):
         SemanticMemoryGameEnv.team_len,
         rl.Stats.terminated,
         SemanticMemoryGameEnv.team_matches,
+        SemanticMemoryGameEnv.invalid_actions,
     )
 
     results = rl.evals(env, policy, stats, n=1000)
-    rets, lens, wins, n_matches = results
+    rets, lens, wins, n_matches, n_invalid = results
 
     if not (~wins | (n_matches == (env.game.n_cards // 2) - 1)).all():
         print(f'WARNING: policy did not find all matches in all episodes')
@@ -470,8 +480,8 @@ def plot_mean_std(x, y, yerr, label, smoothing_window=None, color=None, ax=plt):
 
 def print_evals():
     train_env_ids = [
-        'omniscent_ai_only',
-        'partial_ai_only',
+        # 'omniscent_ai_only',
+        # 'partial_ai_only',
         'mixed_team',
     ]
     train_results = {
@@ -499,8 +509,8 @@ def print_evals():
 
 def plot_results():
     train_env_ids = [
-        'omniscent_ai_only',
-        'partial_ai_only',
+        # 'omniscent_ai_only',
+        # 'partial_ai_only',
         'mixed_team',
     ]
     train_results = {
@@ -602,6 +612,8 @@ def main():
     # visual repr of optimal policy execution:
     # - show which categories are chosen by each agent
     # - handover/steps percentage per agent
+    # - omniscent AI + human
+    # - multiple humans
     pass
 
 
