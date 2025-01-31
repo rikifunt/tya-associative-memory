@@ -1,3 +1,11 @@
+"""
+ChatGPT comment:
+
+Here is the function implementing the human-like decision-making process based on the given constraints:
+
+This function incorporates stochastic decision-making based on knowledge levels and trust, ensuring it avoids invalid actions while simulating human-like behavior. Let me know if you want any tweaks!
+"""
+
 import random
 
 def humanDecision(state):
