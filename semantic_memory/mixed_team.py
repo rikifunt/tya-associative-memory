@@ -465,19 +465,22 @@ def train(env_id):
         'eval_terms': terms,
         'eval_ai_matches': ai_matches,
         'eval_human_matches': human_matches,
-        
-        'eval_rets_high': rets_high,
-        'eval_lens_high': ep_lens_high,
-        'eval_terms_high': terms_high,
-        'eval_ai_matches_high': ai_matches,
-        'eval_human_matches_high': human_matches,
-
-        'eval_rets_low': rets_low,
-        'eval_lens_low': ep_lens_low,
-        'eval_terms_low': terms_low,
-        'eval_ai_matches_low': ai_matches,
-        'eval_human_matches_low': human_matches,
     }
+
+    if 'mixed_team' in env_id:
+        results.update({        
+            'eval_rets_high': rets_high,
+            'eval_lens_high': ep_lens_high,
+            'eval_terms_high': terms_high,
+            'eval_ai_matches_high': ai_matches,
+            'eval_human_matches_high': human_matches,
+
+            'eval_rets_low': rets_low,
+            'eval_lens_low': ep_lens_low,
+            'eval_terms_low': terms_low,
+            'eval_ai_matches_low': ai_matches,
+            'eval_human_matches_low': human_matches,
+        })
     return results
 
 
@@ -549,8 +552,8 @@ def get_fixed_evals():
     }
     fixed_names = {
         'random': 'Random policy',
-        'human_high': 'Good Human policy',
-        'human_low': 'Bad Human policy',
+        'human_high': 'H-good',
+        'human_low': 'H-bad',
     }
     return fixed_results, fixed_names
 
@@ -575,13 +578,13 @@ def plot_mean_std(x, y, yerr, label, smoothing_window=None, color=None, ax=plt):
         yerr = smooth(yerr, window_len=smoothing_window)
 
     p = ax.plot(x, y, label=label, color=color)
-    ax.fill_between(x, y-yerr, y+yerr, color=p[0].get_color(), alpha=0.15)
+    ax.fill_between(x, y-yerr, y+yerr, color=p[0].get_color(), alpha=0.1)
 
 
 def print_evals():
     train_env_ids = [
-        # 'omniscent_ai_only',
-        # 'partial_ai_only',
+        'omniscent_ai_only',
+        'partial_ai_only',
         # 'mixed_team',
         'mixed_team_ctf',
         'mixed_team_no_ctf',
@@ -617,8 +620,8 @@ def print_evals():
 
 def plot_results():
     train_env_ids = [
-        # 'omniscent_ai_only',
-        # 'partial_ai_only',
+        'omniscent_ai_only',
+        'partial_ai_only',
         # 'mixed_team',
         'mixed_team_ctf',
         'mixed_team_no_ctf',
@@ -630,12 +633,12 @@ def plot_results():
         for fn in train_env_ids
     }
     train_fn_names = {
-        'omniscent_ai_only': 'AI only (omniscent)',
-        'partial_ai_only': 'AI only (partial competence)',
-        'mixed_team_ctf': 'AI-CTF (partial competence) + human',
-        'mixed_team_no_ctf': 'AI (partial competence) + human',
-        'mixed_team_high_human': 'AI (partial competence) + good human',
-        'mixed_team_low_human': 'AI (partial competence) + bad human',  
+        'omniscent_ai_only': 'RL-omni',
+        'partial_ai_only': 'RL-solo',
+        'mixed_team_ctf': 'RL-CTF + Humans',
+        'mixed_team_no_ctf': 'RL + Humans',
+        # 'mixed_team_high_human': 'AI (partial competence) + good human',
+        # 'mixed_team_low_human': 'AI (partial competence) + bad human',  
     }
 
     fixed_results, fixed_names = get_fixed_evals()
@@ -646,7 +649,7 @@ def plot_results():
             'ylabel': 'Episode Return',
         },
         'lens': {
-            'title': '(Team) steps to solution',
+            'title': 'Steps to solution',
             'ylabel': 'Episode length',
         },
     }
@@ -672,6 +675,16 @@ def plot_results():
                 np.full_like(train_xs, results[k].std()),
                 label=fixed_names[fixed_policy],
             )
+
+        # planning solution
+        if k == 'lens':
+            plot_mean_std(
+                train_xs,
+                np.full_like(train_xs, 9),
+                np.zeros_like(train_xs),
+                label='Optimal deterministic plan',
+            )
+
         plt.legend()
         plt.savefig(f'../images/{k}.png')
         plt.show()
